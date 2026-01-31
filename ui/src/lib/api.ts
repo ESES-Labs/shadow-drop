@@ -35,6 +35,15 @@ export interface EligibilityResponse {
     already_claimed: boolean;
 }
 
+export interface ProofResponse {
+    merkle_root: string;
+    nullifier_hash: string;
+    leaf_index: number;
+    merkle_path: string[];
+    amount: number;
+    secret: string;
+}
+
 interface ApiResponse<T> {
     success: boolean;
     code: number;
@@ -111,4 +120,20 @@ export async function markClaimed(address: string, wallet: string): Promise<void
     if (!result.success) {
         throw new Error(result.message || 'Failed to mark as claimed');
     }
+}
+
+/**
+ * Generate ZK proof for a claim
+ */
+export async function generateProof(address: string, wallet: string): Promise<ProofResponse> {
+    const response = await fetch(`${API_BASE}/api/v1/proofs/${address}/generate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ wallet }),
+    });
+    const result: ApiResponse<ProofResponse> = await response.json();
+    if (!result.success || !result.data) {
+        throw new Error(result.message || 'Failed to generate proof');
+    }
+    return result.data;
 }

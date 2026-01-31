@@ -1,4 +1,5 @@
 import { PublicKey } from "@solana/web3.js";
+import { buildMerkleTree, generateSecret, toHex } from "./merkle";
 
 // Program ID
 export const PROGRAM_ID = new PublicKey("7wjDqUQUpnudD25MELXBiayNiMrStXaKAdrLMwzccu7v");
@@ -55,19 +56,23 @@ export function generateCampaignId(): string {
 }
 
 /**
- * Generate a simple merkle root from recipient list (placeholder)
- * In production, use a proper merkle tree library
+ * Generate a proper merkle root from recipient list using Poseidon hashing
  */
 export function generateMerkleRoot(recipients: { wallet: string; amount: number }[]): Uint8Array {
-    // Simple hash of recipients for demo - in production use proper merkle tree
-    const data = recipients.map(r => `${r.wallet}:${r.amount}`).join("|");
-    const encoder = new TextEncoder();
-    const encoded = encoder.encode(data);
+    // Generate secrets for each recipient
+    const recipientsWithSecrets = recipients.map(r => ({
+        wallet: r.wallet,
+        amount: r.amount,
+        secret: generateSecret()
+    }));
 
-    // Create a 32-byte hash (simplified - use sha256 in production)
-    const hash = new Uint8Array(32);
-    for (let i = 0; i < encoded.length; i++) {
-        hash[i % 32] ^= encoded[i];
-    }
-    return hash;
+    // Build merkle tree
+    const { root } = buildMerkleTree(recipientsWithSecrets);
+
+    return root;
 }
+
+/**
+ * Re-export toHex for convenience
+ */
+export { toHex };

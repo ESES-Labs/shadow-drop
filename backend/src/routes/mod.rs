@@ -3,10 +3,12 @@ use axum::Router;
 use crate::state::AppState;
 
 mod campaigns;
+mod proofs;
 
 pub fn app_routes(state: AppState) -> Router {
     let api_routes = Router::new()
-        .nest("/campaigns", campaigns::campaign_routes());
+        .nest("/campaigns", campaigns::campaign_routes())
+        .nest("/proofs", proofs::proof_routes());
 
     Router::new()
         .nest("/api/v1", api_routes)

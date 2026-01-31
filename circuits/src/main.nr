@@ -1,34 +1,36 @@
 // Shadow Drop - Merkle Claim Circuit
-// This circuit proves that a user knows a valid leaf in a merkle tree
-// without revealing which leaf they are claiming
+// Simplified for Sunspot compatibility (depth 8 = 256 recipients max)
+// Uses native Noir Poseidon2 hashing
 
 use std::hash::poseidon2;
 
-// Merkle tree depth (supports up to 2^20 = 1M recipients)
-global TREE_DEPTH: u32 = 20;
+// Merkle tree depth (supports up to 2^8 = 256 recipients for demo)
+// Can increase for production
+global TREE_DEPTH: u32 = 8;
 
 // Main circuit for proving airdrop claim eligibility
+// Proves: "I know a valid leaf in the merkle tree for this recipient"
 fn main(
-    // Public inputs
+    // Public inputs (visible on-chain)
     merkle_root: pub Field,          // The merkle root stored on-chain
     nullifier_hash: pub Field,       // Prevents double claiming
-    recipient_address: pub Field,    // Where tokens should be sent
+    recipient: pub Field,            // Recipient address (as field)
     
-    // Private inputs  
-    amount: Field,                   // Claim amount (hidden)
-    secret: Field,                   // User's secret (for nullifier)
-    leaf_index: Field,               // Position in merkle tree
-    merkle_path: [Field; TREE_DEPTH] // Siblings for merkle proof
+    // Private inputs (hidden, only prover knows)
+    amount: Field,                   // Claim amount
+    secret: Field,                   // User's secret for nullifier
+    leaf_index: Field,               // Position in merkle tree (0 to 2^depth - 1)
+    merkle_path: [Field; TREE_DEPTH] // Sibling hashes for merkle proof
 ) {
-    // 1. Compute the leaf hash: hash(address, amount, secret)
-    let leaf = poseidon2::Poseidon2::hash([recipient_address, amount, secret], 3);
+    // 1. Compute the leaf hash: hash(recipient, amount, secret)
+    let leaf = poseidon2::Poseidon2::hash([recipient, amount, secret], 3);
     
-    // 2. Verify merkle proof
+    // 2. Verify merkle proof - compute root from leaf and path
     let computed_root = compute_merkle_root(leaf, leaf_index, merkle_path);
     assert(computed_root == merkle_root, "Invalid merkle proof");
     
-    // 3. Verify nullifier to prevent double claiming
-    // nullifier = hash(secret, leaf_index) - unique per claim
+    // 3. Verify nullifier - hash(secret, leaf_index) must match
+    // This prevents double claiming while maintaining privacy
     let computed_nullifier = poseidon2::Poseidon2::hash([secret, leaf_index], 2);
     assert(computed_nullifier == nullifier_hash, "Invalid nullifier");
 }
@@ -40,38 +42,59 @@ fn compute_merkle_root(
     path: [Field; TREE_DEPTH]
 ) -> Field {
     let mut current = leaf;
-    let mut idx = index;
+    let mut idx = index as u64;
     
     for i in 0..TREE_DEPTH {
         let sibling = path[i];
-        let is_right = idx as u64 % 2;
+        let is_right = idx % 2;
         
+        // Hash order depends on position (left or right child)
         if is_right == 1 {
-            // Current node is on the right, sibling is on left
+            // Current is right child, sibling is left
             current = poseidon2::Poseidon2::hash([sibling, current], 2);
         } else {
-            // Current node is on the left, sibling is on right
+            // Current is left child, sibling is right
             current = poseidon2::Poseidon2::hash([current, sibling], 2);
         }
         
-        idx = (idx as u64 / 2) as Field;
+        idx = idx / 2;
     }
     
     current
 }
 
-// Test the circuit with sample data
+// Helper to compute leaf hash (can be used for testing)
+fn compute_leaf(recipient: Field, amount: Field, secret: Field) -> Field {
+    poseidon2::Poseidon2::hash([recipient, amount, secret], 3)
+}
+
+// Helper to compute nullifier (can be used for testing)
+fn compute_nullifier(secret: Field, leaf_index: Field) -> Field {
+    poseidon2::Poseidon2::hash([secret, leaf_index], 2)
+}
+
 #[test]
-fn test_merkle_claim() {
-    // This would be populated with actual test data
-    let merkle_root = 0x1234;
-    let nullifier_hash = 0x5678;
-    let recipient = 0xabcd;
+fn test_leaf_computation() {
+    let recipient = 0x1234;
     let amount = 1000;
     let secret = 0x9999;
-    let leaf_index = 0;
-    let merkle_path = [0; TREE_DEPTH];
     
-    // Note: This test will fail with dummy data
-    // Real tests need proper merkle tree construction
+    let leaf = compute_leaf(recipient, amount, secret);
+    // Just verify it doesn't panic
+    assert(leaf != 0);
+}
+
+#[test]
+fn test_nullifier_computation() {
+    let secret = 0x9999;
+    let leaf_index = 5;
+    
+    let nullifier = compute_nullifier(secret, leaf_index);
+    // Same inputs should produce same nullifier
+    let nullifier2 = compute_nullifier(secret, leaf_index);
+    assert(nullifier == nullifier2);
+    
+    // Different index should produce different nullifier
+    let nullifier3 = compute_nullifier(secret, 6);
+    assert(nullifier != nullifier3);
 }
