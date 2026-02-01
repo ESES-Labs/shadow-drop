@@ -19,6 +19,10 @@ export interface CreateCampaignRequest {
     vesting_start?: number;
     vesting_cliff_seconds?: number;
     vesting_duration_seconds?: number;
+    // Token fields (optional, None = SOL campaign)
+    token_mint?: string;
+    token_symbol?: string;
+    token_decimals?: number;
 }
 
 export interface CampaignInfo {
@@ -37,6 +41,10 @@ export interface CampaignInfo {
     vesting_start?: number;
     vesting_cliff_seconds?: number;
     vesting_duration_seconds?: number;
+    // Token fields (optional, None = SOL)
+    token_mint?: string;
+    token_symbol?: string;
+    token_decimals?: number;
 }
 
 export interface EligibilityResponse {
@@ -62,6 +70,8 @@ export interface EligibleCampaign {
     total_recipients: number;
     vault_address?: string;
     created_at: string;
+    token_symbol?: string;
+    token_decimals?: number;
 }
 
 interface ApiResponse<T> {

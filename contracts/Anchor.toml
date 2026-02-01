@@ -7,6 +7,12 @@ skip-lint = false
 [programs.localnet]
 contracts = "7wjDqUQUpnudD25MELXBiayNiMrStXaKAdrLMwzccu7v"
 
+[programs.devnet]
+contracts = "7wjDqUQUpnudD25MELXBiayNiMrStXaKAdrLMwzccu7v"
+
+[programs.mainnet]
+contracts = "7wjDqUQUpnudD25MELXBiayNiMrStXaKAdrLMwzccu7v"
+
 [registry]
 url = "https://api.apr.dev"
 

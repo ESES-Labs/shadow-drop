@@ -3,22 +3,26 @@ import { WalletMultiButton } from "@solana/wallet-adapter-react-ui";
 import { useShadowDrop } from "../hooks/useShadowDrop";
 import { BN } from "@coral-xyz/anchor";
 import { PublicKey, SystemProgram, LAMPORTS_PER_SOL } from "@solana/web3.js";
+import { TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID, getAssociatedTokenAddress } from "@solana/spl-token";
 import {
     Shield, Zap, EyeOff, Gift, ArrowRight,
     Upload, Clock, CheckCircle2,
     BarChart3, Wallet, Copy, ExternalLink,
     Sparkles, Lock, AlertCircle, Loader2,
-    Calendar
+    Calendar, ChevronDown
 } from "lucide-react";
+import { useNetwork } from "../providers/NetworkProvider";
 
 
 export function Dashboard() {
     const { connected, publicKey, connection } = useShadowDrop();
+    const { network, config, setNetwork } = useNetwork();
     const [balance, setBalance] = useState<number | null>(null);
     const [activeTab, setActiveTab] = useState<"create" | "claim" | "manage">("create");
     const [requestingAirdrop, setRequestingAirdrop] = useState(false);
     const [airdropStatus, setAirdropStatus] = useState<'idle' | 'success'>('idle');
     const [systemStatus, setSystemStatus] = useState<'online' | 'offline' | 'checking'>('checking');
+    const [showNetworkDropdown, setShowNetworkDropdown] = useState(false);
 
     // System Status Check
     useEffect(() => {
@@ -67,7 +71,7 @@ export function Dashboard() {
             setTimeout(() => setAirdropStatus('idle'), 3000);
         } catch (e) {
             console.error(e);
-            alert("Airdrop failed (Localnet might be down): " + e);
+            alert("Airdrop request failed. If on Devnet, try using the official faucet at faucet.solana.com. Error: " + e);
         } finally {
             setRequestingAirdrop(false);
         }
@@ -100,7 +104,7 @@ export function Dashboard() {
                                 <button
                                     key={tab.id}
                                     onClick={() => setActiveTab(tab.id as "create" | "claim" | "manage")}
-                                    className={`px-4 py-2 rounded-lg font-medium text-sm transition-all flex items-center gap-2 ${activeTab === tab.id
+                                    className={`px-4 py-2 rounded-lg font-medium text-sm transition-all flex items-center gap-2 cursor-pointer ${activeTab === tab.id
                                         ? "bg-white/10 text-white"
                                         : "text-gray-400 hover:text-white hover:bg-white/5"
                                         }`}
@@ -116,9 +120,64 @@ export function Dashboard() {
                         {/* System Status Indicator */}
                         {systemStatus === 'online' ? (
                             <>
-                                <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 bg-emerald-500/10 border border-emerald-500/20 rounded-full">
-                                    <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse" />
-                                    <span className="text-xs text-emerald-400 font-medium">Localnet</span>
+                                {/* Network Switcher */}
+                                <div className="relative">
+                                    <button
+                                        onClick={() => setShowNetworkDropdown(!showNetworkDropdown)}
+                                        className={`hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-full transition-all cursor-pointer ${network === "localnet"
+                                            ? "bg-emerald-500/10 border border-emerald-500/20 hover:bg-emerald-500/20"
+                                            : "bg-cyan-500/10 border border-cyan-500/20 hover:bg-cyan-500/20"
+                                            }`}
+                                    >
+                                        <div className={`w-2 h-2 rounded-full animate-pulse ${network === "localnet" ? "bg-emerald-500" : "bg-cyan-500"
+                                            }`} />
+                                        <span className={`text-xs font-medium ${network === "localnet" ? "text-emerald-400" : "text-cyan-400"
+                                            }`}>
+                                            {config.name}
+                                        </span>
+                                        <ChevronDown className={`w-3 h-3 transition-transform ${showNetworkDropdown ? "rotate-180" : ""
+                                            } ${network === "localnet" ? "text-emerald-400" : "text-cyan-400"}`} />
+                                    </button>
+
+                                    {/* Dropdown */}
+                                    {showNetworkDropdown && (
+                                        <div className="absolute top-full mt-2 right-0 w-48 bg-[#12121a] border border-white/10 rounded-xl shadow-xl overflow-hidden z-50">
+                                            <button
+                                                onClick={() => {
+                                                    setNetwork("localnet");
+                                                    setShowNetworkDropdown(false);
+                                                }}
+                                                className={`w-full flex items-center gap-3 px-4 py-3 text-left transition-all ${network === "localnet"
+                                                    ? "bg-emerald-500/10 text-emerald-300"
+                                                    : "hover:bg-white/5 text-gray-400"
+                                                    }`}
+                                            >
+                                                <div className="w-2 h-2 bg-emerald-500 rounded-full" />
+                                                <div>
+                                                    <div className="text-sm font-medium">Localnet</div>
+                                                    <div className="text-xs text-gray-500">localhost:8899</div>
+                                                </div>
+                                                {network === "localnet" && <CheckCircle2 className="w-4 h-4 ml-auto" />}
+                                            </button>
+                                            <button
+                                                onClick={() => {
+                                                    setNetwork("devnet");
+                                                    setShowNetworkDropdown(false);
+                                                }}
+                                                className={`w-full flex items-center gap-3 px-4 py-3 text-left transition-all ${network === "devnet"
+                                                    ? "bg-cyan-500/10 text-cyan-300"
+                                                    : "hover:bg-white/5 text-gray-400"
+                                                    }`}
+                                            >
+                                                <div className="w-2 h-2 bg-cyan-500 rounded-full" />
+                                                <div>
+                                                    <div className="text-sm font-medium">Devnet</div>
+                                                    <div className="text-xs text-gray-500">Solana Devnet</div>
+                                                </div>
+                                                {network === "devnet" && <CheckCircle2 className="w-4 h-4 ml-auto" />}
+                                            </button>
+                                        </div>
+                                    )}
                                 </div>
                                 <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 bg-violet-500/10 border border-violet-500/20 rounded-full">
                                     <div className="w-2 h-2 bg-violet-500 rounded-full animate-pulse" />
@@ -286,6 +345,15 @@ function LandingPage() {
     );
 }
 
+// Random campaign name generator
+const generateCampaignName = () => {
+    const adjectives = ["Genesis", "Cosmic", "Shadow", "Quantum", "Stellar", "Aurora", "Phoenix", "Velocity", "Nexus", "Eclipse", "Omega", "Prime", "Alpha", "Nova", "Zenith"];
+    const nouns = ["Drop", "Wave", "Storm", "Launch", "Surge", "Blast", "Boost", "Rush", "Flow", "Spark", "Rise", "Pulse", "Flash", "Burst", "Strike"];
+    const adj = adjectives[Math.floor(Math.random() * adjectives.length)];
+    const noun = nouns[Math.floor(Math.random() * nouns.length)];
+    return `${adj} ${noun}`;
+};
+
 function CreateAirdrop({ balance }: { balance: number | null }) {
     const [step, setStep] = useState(0);
     const [airdropType, setAirdropType] = useState<"instant" | "vested" | null>(null);
@@ -301,7 +369,107 @@ function CreateAirdrop({ balance }: { balance: number | null }) {
     const [success, setSuccess] = useState(false);
     const [campaignAddress, setCampaignAddress] = useState("");
     const [txSignature, setTxSignature] = useState("");
-    const { publicKey, program } = useShadowDrop();
+    // Token selection state
+    const [tokenType, setTokenType] = useState<"sol" | "spl">("spl");
+    const [tokenMint, setTokenMint] = useState("");
+    const [tokenSymbol, setTokenSymbol] = useState("");
+    const [tokenDecimals, setTokenDecimals] = useState(9);
+    // Wallet tokens
+    const [walletTokens, setWalletTokens] = useState<Array<{ mint: string, name: string, symbol: string, decimals: number, balance: number, uiBalance: string }>>([]);;
+    const [loadingTokens, setLoadingTokens] = useState(false);
+    const { publicKey, program, connection } = useShadowDrop();
+
+    // Fetch wallet token accounts
+    useEffect(() => {
+        if (!publicKey || !connection) return;
+
+        const fetchTokens = async () => {
+            setLoadingTokens(true);
+            try {
+                const tokenAccounts = await connection.getParsedTokenAccountsByOwner(
+                    publicKey,
+                    { programId: TOKEN_PROGRAM_ID }
+                );
+
+                const tokensWithoutMetadata = tokenAccounts.value
+                    .filter(acc => {
+                        const amount = acc.account.data.parsed.info.tokenAmount;
+                        return amount.uiAmount > 0; // Only show tokens with balance
+                    })
+                    .map(acc => {
+                        const info = acc.account.data.parsed.info;
+                        const mint = info.mint;
+                        const decimals = info.tokenAmount.decimals;
+                        const balance = info.tokenAmount.amount;
+                        const uiBalance = info.tokenAmount.uiAmountString;
+                        const shortMint = mint.substring(0, 4) + "..." + mint.substring(mint.length - 4);
+                        return {
+                            mint,
+                            name: shortMint,
+                            symbol: shortMint,
+                            decimals,
+                            balance: parseInt(balance),
+                            uiBalance
+                        };
+                    });
+
+                // Try to fetch metadata from Helius if API key is available
+                const heliusApiKey = import.meta.env.VITE_HELIUS_API_KEY;
+                if (heliusApiKey && tokensWithoutMetadata.length > 0) {
+                    try {
+                        const response = await fetch(`https://mainnet.helius-rpc.com/?api-key=${heliusApiKey}`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                jsonrpc: '2.0',
+                                id: 'token-metadata',
+                                method: 'getAssetBatch',
+                                params: {
+                                    ids: tokensWithoutMetadata.map(t => t.mint)
+                                }
+                            })
+                        });
+                        const data = await response.json();
+                        if (data.result) {
+                            const metadataMap = new Map();
+                            data.result.forEach((asset: any) => {
+                                if (asset && asset.id) {
+                                    metadataMap.set(asset.id, {
+                                        name: asset.content?.metadata?.name || null,
+                                        symbol: asset.content?.metadata?.symbol || null
+                                    });
+                                }
+                            });
+                            // Merge metadata
+                            const tokensWithMetadata = tokensWithoutMetadata.map(token => {
+                                const meta = metadataMap.get(token.mint);
+                                if (meta) {
+                                    return {
+                                        ...token,
+                                        name: meta.name || token.name,
+                                        symbol: meta.symbol || token.symbol
+                                    };
+                                }
+                                return token;
+                            });
+                            setWalletTokens(tokensWithMetadata);
+                            return;
+                        }
+                    } catch (metaErr) {
+                        console.warn("Failed to fetch token metadata from Helius:", metaErr);
+                    }
+                }
+
+                setWalletTokens(tokensWithoutMetadata);
+            } catch (e) {
+                console.error("Failed to fetch token accounts", e);
+            } finally {
+                setLoadingTokens(false);
+            }
+        };
+
+        fetchTokens();
+    }, [publicKey, connection]);
 
     const recipientCount = recipients.split("\n").filter(r => r.trim()).length;
 
@@ -337,11 +505,34 @@ function CreateAirdrop({ balance }: { balance: number | null }) {
 
             const amountToSend = parseFloat(tokenAmount || "0");
 
-            // Check balance (need extra for rent)
-            const rentBuffer = 0.01; // ~0.01 SOL for account rent
-            if (balance === null || amountToSend + rentBuffer > balance) {
-                alert(`Insufficient balance! You have ${balance?.toFixed(4) || 0} SOL but need ${(amountToSend + rentBuffer).toFixed(4)} SOL.`);
-                throw new Error("Insufficient balance");
+            // 1. Check balances based on Token Type
+            const rentBuffer = 0.02; // ~0.02 SOL for account rent and fees
+
+            if (tokenType === "sol") {
+                // For SOL airdrop: Check SOL balance > amount + rent
+                if (balance === null || amountToSend + rentBuffer > balance) {
+                    alert(`Insufficient SOL balance! You have ${balance?.toFixed(4) || 0} SOL but need ${(amountToSend + rentBuffer).toFixed(4)} SOL (incl. fees).`);
+                    throw new Error("Insufficient balance");
+                }
+            } else {
+                // For SPL Token airdrop:
+                // 1. Check SOL balance > rent (for fees)
+                if (balance === null || balance < rentBuffer) {
+                    alert(`Insufficient SOL for fees! You have ${balance?.toFixed(4) || 0} SOL but need at least ${rentBuffer} SOL for transaction fees.`);
+                    throw new Error("Insufficient SOL balance");
+                }
+
+                // 2. Check SPL Token balance > amount
+                const selectedToken = walletTokens.find(t => t.mint === tokenMint);
+                // amountToSend is in user-friendly units (e.g. 50 USDC), balance is raw (e.g. 50000000)
+                // BUT walletTokens.balance from our hook seems to be raw amount, while uiBalance is string
+                // Let's rely on uiBalance parsing for safety or re-calculate
+                const tokenBalance = selectedToken ? parseFloat(selectedToken.uiBalance) : 0;
+
+                if (!selectedToken || amountToSend > tokenBalance) {
+                    alert(`Insufficient ${tokenSymbol || "Token"} balance! You have ${tokenBalance.toLocaleString()} ${tokenSymbol} but need ${amountToSend.toLocaleString()}.`);
+                    throw new Error("Insufficient token balance");
+                }
             }
 
             // Parse recipients from textarea
@@ -373,23 +564,61 @@ function CreateAirdrop({ balance }: { balance: number | null }) {
             const vestingCliffSeconds = vestingEnabled ? new BN(parseInt(vestingCliffDays || "0") * 86400) : new BN(0);
             const vestingDurationSeconds = vestingEnabled ? new BN(parseInt(vestingDurationDays || "30") * 86400) : new BN(0);
 
-            // Call smart contract create_campaign instruction with vesting params
-            const tx = await program.methods
-                .createCampaign(
-                    campaignId,
-                    Array.from(merkleRoot),
-                    lamports,
-                    vestingStartTs,
-                    vestingCliffSeconds,
-                    vestingDurationSeconds
-                )
-                .accounts({
-                    authority: publicKey,
-                    campaign: campaignPDA,
-                    vault: vaultPDA,
-                    systemProgram: SystemProgram.programId,
-                })
-                .rpc();
+            // Call smart contract instruction based on token type
+            let tx;
+
+            if (tokenType === "sol") {
+                // SOL Campaign
+                tx = await program.methods
+                    .createCampaign(
+                        campaignId,
+                        Array.from(merkleRoot),
+                        lamports,
+                        vestingStartTs,
+                        vestingCliffSeconds,
+                        vestingDurationSeconds
+                    )
+                    .accounts({
+                        authority: publicKey,
+                        campaign: campaignPDA,
+                        vault: vaultPDA,
+                        systemProgram: SystemProgram.programId,
+                    })
+                    .rpc();
+            } else {
+                // SPL Token Campaign
+                if (!tokenMint) throw new Error("Token mint needed for SPL campaign");
+
+                const mintPubkey = new PublicKey(tokenMint);
+                // Get user's ATA
+                const userAta = await getAssociatedTokenAddress(mintPubkey, publicKey);
+                // Get campaign's vault ATA (owned by campaign PDA)
+                const campaignVaultAta = await getAssociatedTokenAddress(mintPubkey, campaignPDA, true);
+
+                // Calculate token amount with decimals
+                const tokenAmountBN = new BN(parseFloat(tokenAmount || "0") * Math.pow(10, tokenDecimals));
+
+                tx = await program.methods
+                    .createTokenCampaign(
+                        campaignId,
+                        Array.from(merkleRoot),
+                        tokenAmountBN,
+                        vestingStartTs,
+                        vestingCliffSeconds,
+                        vestingDurationSeconds
+                    )
+                    .accounts({
+                        authority: publicKey,
+                        campaign: campaignPDA,
+                        tokenMint: mintPubkey,
+                        tokenVault: campaignVaultAta,
+                        authorityTokenAccount: userAta,
+                        tokenProgram: TOKEN_PROGRAM_ID,
+                        associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+                        systemProgram: SystemProgram.programId,
+                    })
+                    .rpc();
+            }
 
             console.log("Transaction signature:", tx);
             setTxSignature(tx);
@@ -414,6 +643,10 @@ function CreateAirdrop({ balance }: { balance: number | null }) {
                 vesting_start: Math.floor(Date.now() / 1000),  // Current timestamp as integer
                 vesting_cliff_seconds: parseInt(vestingCliffDays || "0") * 86400,
                 vesting_duration_seconds: parseInt(vestingDurationDays || "30") * 86400,
+                // Token params (only for SPL tokens)
+                token_mint: tokenType === "spl" ? tokenMint : undefined,
+                token_symbol: tokenType === "spl" ? tokenSymbol : undefined,
+                token_decimals: tokenType === "spl" ? tokenDecimals : undefined,
             });
 
             console.log("Campaign created on-chain and saved to backend");
@@ -431,7 +664,8 @@ function CreateAirdrop({ balance }: { balance: number | null }) {
     };
 
     if (success) {
-        const shareText = `🎁 Claim your airdrop from ${campaignName}!\n\n💰 ${tokenAmount} SOL available\n📍 Campaign: ${campaignAddress}\n\nClaim at: ${window.location.origin}`;
+        const tokenDisplay = tokenType === "spl" ? (tokenSymbol || "tokens") : "SOL";
+        const shareText = `🎁 Claim your airdrop from ${campaignName}!\n\n💰 ${tokenAmount} ${tokenDisplay} available\n📍 Campaign: ${campaignAddress}\n\nClaim at: ${window.location.origin}`;
 
         return (
             <div className="max-w-3xl mx-auto">
@@ -474,7 +708,7 @@ function CreateAirdrop({ balance }: { balance: number | null }) {
                                 <div className="text-3xl font-bold bg-gradient-to-r from-violet-400 to-fuchsia-400 bg-clip-text text-transparent">
                                     {tokenAmount}
                                 </div>
-                                <div className="text-sm text-gray-500 mt-1">SOL Total</div>
+                                <div className="text-sm text-gray-500 mt-1">{tokenType === "spl" ? tokenSymbol || "Tokens" : "SOL"} Total</div>
                             </div>
                             <div className="bg-white/[0.03] border border-white/5 rounded-2xl p-4 text-center">
                                 <div className="text-3xl font-bold text-white">{recipientCount}</div>
@@ -616,6 +850,11 @@ function CreateAirdrop({ balance }: { balance: number | null }) {
                                     setVestingEnabled(false);
                                     setVestingCliffDays("");
                                     setVestingDurationDays("");
+                                    // Reset token state
+                                    setTokenType("spl");
+                                    setTokenMint("");
+                                    setTokenSymbol("");
+                                    setTokenDecimals(9);
                                 }}
                                 className="flex items-center justify-center gap-2 bg-white/5 hover:bg-white/10 border border-white/10 text-white font-semibold py-4 rounded-xl transition-all"
                             >
@@ -686,7 +925,7 @@ function CreateAirdrop({ balance }: { balance: number | null }) {
                                     setVestingEnabled(false);
                                     setStep(1);
                                 }}
-                                className={`p-6 rounded-2xl border-2 text-left transition-all hover:bg-white/[0.04] ${airdropType === "instant"
+                                className={`p-6 rounded-2xl border-2 text-left transition-all hover:bg-white/[0.04] cursor-pointer ${airdropType === "instant"
                                     ? "border-violet-500 bg-violet-500/10"
                                     : "border-white/10 hover:border-white/20"
                                     }`}
@@ -707,7 +946,7 @@ function CreateAirdrop({ balance }: { balance: number | null }) {
                                     setVestingEnabled(true);
                                     setStep(1);
                                 }}
-                                className={`p-6 rounded-2xl border-2 text-left transition-all hover:bg-white/[0.04] ${airdropType === "vested"
+                                className={`p-6 rounded-2xl border-2 text-left transition-all hover:bg-white/[0.04] cursor-pointer ${airdropType === "vested"
                                     ? "border-violet-500 bg-violet-500/10"
                                     : "border-white/10 hover:border-white/20"
                                     }`}
@@ -815,7 +1054,7 @@ function CreateAirdrop({ balance }: { balance: number | null }) {
                         <button
                             onClick={() => setStep(2)}
                             disabled={recipientCount === 0}
-                            className="w-full bg-gradient-to-r from-violet-600 to-fuchsia-600 hover:from-violet-500 hover:to-fuchsia-500 disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold py-4 rounded-xl transition-all flex items-center justify-center gap-2"
+                            className="w-full bg-gradient-to-r from-violet-600 to-fuchsia-600 hover:from-violet-500 hover:to-fuchsia-500 disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold py-4 rounded-xl transition-all flex items-center justify-center gap-2 cursor-pointer"
                         >
                             Continue
                             <ArrowRight className="w-4 h-4" />
@@ -835,13 +1074,22 @@ function CreateAirdrop({ balance }: { balance: number | null }) {
                                 <label className="block text-sm font-medium text-gray-400 mb-2">
                                     Campaign Name
                                 </label>
-                                <input
-                                    type="text"
-                                    value={campaignName}
-                                    onChange={(e) => setCampaignName(e.target.value)}
-                                    placeholder="My Private Airdrop"
-                                    className="w-full bg-black/40 border border-white/10 rounded-xl p-4 text-white placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-violet-500/50"
-                                />
+                                <div className="flex gap-2">
+                                    <input
+                                        type="text"
+                                        value={campaignName}
+                                        onChange={(e) => setCampaignName(e.target.value)}
+                                        placeholder="My Private Airdrop"
+                                        className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-gray-600 focus:outline-none focus:border-fuchsia-500/50 transition-colors"
+                                    />
+                                    <button
+                                        onClick={() => setCampaignName(generateCampaignName())}
+                                        className="bg-white/5 hover:bg-white/10 border border-white/10 text-gray-400 hover:text-white px-4 rounded-xl transition-all cursor-pointer"
+                                        title="Generate Random Name"
+                                    >
+                                        <Sparkles className="w-5 h-5" />
+                                    </button>
+                                </div>
                             </div>
 
                             <div>
@@ -854,35 +1102,117 @@ function CreateAirdrop({ balance }: { balance: number | null }) {
                                         value={tokenAmount}
                                         readOnly
                                         disabled
-                                        className="w-full bg-black/40 border border-white/10 rounded-xl p-4 pr-20 text-gray-400 cursor-not-allowed placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-violet-500/50"
+                                        className="w-full bg-black/40 border border-white/10 rounded-xl p-4 pr-32 text-gray-400 cursor-not-allowed placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-violet-500/50"
                                     />
-                                    <span className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-500">SOL</span>
+                                    {/* Token Type Selector */}
+                                    <div className="absolute right-2 top-1/2 -translate-y-1/2">
+                                        <button
+                                            onClick={() => {
+                                                const newType = tokenType === "sol" ? "spl" : "sol";
+                                                setTokenType(newType);
+                                                if (newType === "sol") {
+                                                    setTokenMint("");
+                                                    setTokenSymbol("");
+                                                    setTokenDecimals(9);
+                                                }
+                                            }}
+                                            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all cursor-pointer ${tokenType === "spl"
+                                                ? "bg-fuchsia-500/20 text-fuchsia-300 border border-fuchsia-500/30 hover:bg-fuchsia-500/30"
+                                                : "bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 hover:bg-cyan-500/30"
+                                                }`}
+                                        >
+                                            {tokenType === "spl" ? (
+                                                <>
+                                                    <Sparkles className="w-4 h-4" />
+                                                    SPL Token
+                                                </>
+                                            ) : (
+                                                <>
+                                                    <div className="w-4 h-4 rounded-full border-2 border-current" />
+                                                    SOL
+                                                </>
+                                            )}
+                                        </button>
+                                    </div>
                                 </div>
                             </div>
 
-                            <div className="p-4 bg-white/[0.02] border border-white/5 rounded-xl">
-                                <div className="flex items-center justify-between">
-                                    <div className="flex items-center gap-3">
-                                        <Clock className="w-5 h-5 text-violet-400" />
-                                        <div>
-                                            <div className="font-medium text-white">Token Vesting</div>
-                                            <div className="text-sm text-gray-500">Release tokens over time</div>
+                            {/* SPL Token Configuration (shown when SPL is selected) */}
+                            {tokenType === "spl" && (
+                                <div className="space-y-4 p-4 bg-fuchsia-500/5 border border-fuchsia-500/20 rounded-xl">
+                                    <div className="flex items-center justify-between">
+                                        <div className="flex items-center gap-2 text-fuchsia-300 font-medium">
+                                            <Sparkles className="w-4 h-4" />
+                                            Select Token from Wallet
                                         </div>
+                                        {loadingTokens && (
+                                            <Loader2 className="w-4 h-4 text-fuchsia-400 animate-spin" />
+                                        )}
                                     </div>
-                                    <button
-                                        onClick={() => setVestingEnabled(!vestingEnabled)}
-                                        disabled={airdropType !== null}
-                                        className={`w-12 h-6 rounded-full transition-all ${vestingEnabled ? "bg-violet-500" : "bg-white/10"} ${airdropType !== null ? "opacity-50 cursor-not-allowed" : ""}`}
-                                    >
-                                        <div className={`w-5 h-5 bg-white rounded-full transition-transform ${vestingEnabled ? "translate-x-6" : "translate-x-0.5"}`} />
-                                    </button>
+
+                                    {walletTokens.length > 0 ? (
+                                        <div className="space-y-2">
+                                            {walletTokens.map((token) => (
+                                                <button
+                                                    key={token.mint}
+                                                    onClick={() => {
+                                                        setTokenMint(token.mint);
+                                                        setTokenSymbol(token.symbol);
+                                                        setTokenDecimals(token.decimals);
+                                                    }}
+                                                    className={`w-full flex items-center justify-between p-4 rounded-xl border transition-all cursor-pointer ${tokenMint === token.mint
+                                                        ? "bg-fuchsia-500/20 border-fuchsia-500/50"
+                                                        : "bg-black/20 border-white/10 hover:bg-white/5 hover:border-white/20"
+                                                        }`}
+                                                >
+                                                    <div className="flex items-center gap-3">
+                                                        <div className="w-10 h-10 bg-gradient-to-br from-fuchsia-500/30 to-violet-500/30 rounded-full flex items-center justify-center">
+                                                            <span className="text-sm font-bold text-fuchsia-300">
+                                                                {token.symbol.substring(0, 2).toUpperCase()}
+                                                            </span>
+                                                        </div>
+                                                        <div className="text-left">
+                                                            <div className="font-medium text-white">
+                                                                {token.name !== token.symbol ? token.name : token.symbol}
+                                                            </div>
+                                                            <div className="text-xs text-gray-500">
+                                                                {token.symbol} • {token.decimals} decimals
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                    <div className="text-right">
+                                                        <div className="font-semibold text-white">{token.uiBalance}</div>
+                                                        <div className="text-xs text-gray-500">Available</div>
+                                                    </div>
+                                                </button>
+                                            ))}
+                                        </div>
+                                    ) : loadingTokens ? (
+                                        <div className="py-8 text-center text-gray-500">
+                                            <Loader2 className="w-6 h-6 mx-auto mb-2 animate-spin" />
+                                            Loading tokens...
+                                        </div>
+                                    ) : (
+                                        <div className="py-8 text-center">
+                                            <div className="text-gray-400 mb-2">No SPL tokens found in wallet</div>
+                                            <div className="text-xs text-gray-500">
+                                                Make sure you have SPL tokens in your connected wallet
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {tokenMint && (
+                                        <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-lg">
+                                            <div className="flex items-center gap-2 text-emerald-300 text-sm">
+                                                <CheckCircle2 className="w-4 h-4" />
+                                                <span>Selected: <strong>{tokenSymbol}</strong> ({tokenDecimals} decimals)</span>
+                                            </div>
+                                        </div>
+                                    )}
                                 </div>
-                                {airdropType !== null && (
-                                    <div className="mt-2 text-xs text-gray-500">
-                                        {airdropType === "vested" ? "Vesting is enabled for this airdrop type" : "Vesting is not available for instant airdrops"}
-                                    </div>
-                                )}
-                            </div>
+                            )}
+
+
 
                             {/* Vesting Configuration (shown when vesting is enabled) */}
                             {vestingEnabled && (
@@ -972,7 +1302,7 @@ function CreateAirdrop({ balance }: { balance: number | null }) {
                             <button
                                 onClick={() => setStep(3)}
                                 disabled={!campaignName || !tokenAmount}
-                                className="flex-1 bg-gradient-to-r from-violet-600 to-fuchsia-600 hover:from-violet-500 hover:to-fuchsia-500 disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold py-4 rounded-xl transition-all flex items-center justify-center gap-2"
+                                className="flex-1 bg-gradient-to-r from-violet-600 to-fuchsia-600 hover:from-violet-500 hover:to-fuchsia-500 disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold py-4 rounded-xl transition-all flex items-center justify-center gap-2 cursor-pointer"
                             >
                                 Continue
                                 <ArrowRight className="w-4 h-4" />
@@ -1011,7 +1341,9 @@ function CreateAirdrop({ balance }: { balance: number | null }) {
                                 </div>
                                 <div className="p-4 bg-black/40 rounded-xl border border-white/5">
                                     <div className="text-sm text-gray-500 mb-1">Total Amount</div>
-                                    <div className="text-lg font-medium text-white">{tokenAmount} SOL</div>
+                                    <div className="text-lg font-medium text-white">
+                                        {tokenAmount} {tokenType === "spl" ? (tokenSymbol || "Tokens") : "SOL"}
+                                    </div>
                                 </div>
                             </div>
 
@@ -1138,27 +1470,69 @@ function ClaimAirdrop() {
             }
             const vaultAddress = new PublicKey(campaign.vault_address);
 
-            // Convert amount to lamports
-            const lamportsAmount = new BN(Math.floor(proofData.amount * LAMPORTS_PER_SOL));
+            // Determine if Token or SOL campaign
+            let tx;
 
-            let tx: string;
+            if (campaign.token_symbol) {
+                // TOKEN CLAIM
+                const decimals = campaign.token_decimals || 9;
+                const tokenAmountBN = new BN(Math.floor(proofData.amount * Math.pow(10, decimals)));
 
-            // Use legacy claim as default (compressed claim temporarily disabled)
-            console.log("🔷 Using LEGACY claim (default)");
+                // Get campaign token mint from data (we need to fetch full campaign info if not in eligible list, 
+                // but let's assume backend EligibleCampaign struct is updated or we fetch it)
+                // Actually EligibleCampaign struct now has token_symbol and decimals but not mint?
+                // Wait, we need mint to define accounts.
+                // Let's fetch full campaign details to get the mint.
+                const { getCampaign } = await import("../lib/api");
+                const fullCampaign = await getCampaign(campaign.address);
 
-            const { deriveClaimRecordPDA } = await import("../lib/pda");
-            const [claimRecordPDA] = deriveClaimRecordPDA(campaignPDA, publicKey);
+                if (!fullCampaign?.token_mint) throw new Error("Token mint not found for this campaign");
 
-            tx = await program.methods
-                .claim(lamportsAmount)
-                .accounts({
-                    claimer: publicKey,
-                    campaign: campaignPDA,
-                    vault: vaultAddress,
-                    claimRecord: claimRecordPDA,
-                    systemProgram: SystemProgram.programId,
-                })
-                .rpc();
+                const mintPubkey = new PublicKey(fullCampaign.token_mint);
+                // User ATA
+                const userAta = await getAssociatedTokenAddress(mintPubkey, publicKey);
+                // Vault ATA
+                const vaultAta = await getAssociatedTokenAddress(mintPubkey, campaignPDA, true);
+
+                console.log("🔷 Using TOKEN claim");
+
+                // Derive claim record PDA
+                const { deriveClaimRecordPDA } = await import("../lib/pda");
+                const [claimRecordPDA] = deriveClaimRecordPDA(campaignPDA, publicKey);
+
+                tx = await program.methods
+                    .claimToken(tokenAmountBN)
+                    .accounts({
+                        claimer: publicKey,
+                        campaign: campaignPDA,
+                        tokenVault: vaultAta,
+                        claimerTokenAccount: userAta,
+                        tokenMint: mintPubkey,
+                        claimRecord: claimRecordPDA,
+                        tokenProgram: TOKEN_PROGRAM_ID,
+                        associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+                        systemProgram: SystemProgram.programId,
+                    })
+                    .rpc();
+            } else {
+                // SOL CLAIM (Legacy)
+                const lamportsAmount = new BN(Math.floor(proofData.amount * LAMPORTS_PER_SOL));
+                console.log("🔷 Using SOL claim");
+
+                const { deriveClaimRecordPDA } = await import("../lib/pda");
+                const [claimRecordPDA] = deriveClaimRecordPDA(campaignPDA, publicKey);
+
+                tx = await program.methods
+                    .claim(lamportsAmount)
+                    .accounts({
+                        claimer: publicKey,
+                        campaign: campaignPDA,
+                        vault: vaultAddress,
+                        claimRecord: claimRecordPDA,
+                        systemProgram: SystemProgram.programId,
+                    })
+                    .rpc();
+            }
 
             console.log("✅ Legacy claim tx:", tx);
             console.log("⚡ ZK Proof verified! Nullifier:", proofData.nullifier_hash);
@@ -1282,34 +1656,29 @@ function ClaimAirdrop() {
                             key={campaign.address}
                             className="bg-white/[0.02] border border-white/5 rounded-2xl p-6 hover:bg-white/[0.04] transition-all"
                         >
-                            <div className="flex items-center justify-between">
-                                <div className="flex items-center gap-4">
-                                    <div className="w-12 h-12 bg-gradient-to-br from-violet-500/20 to-fuchsia-500/20 rounded-xl flex items-center justify-center">
-                                        <Gift className="w-6 h-6 text-violet-400" />
-                                    </div>
-                                    <div>
-                                        <h3 className="text-lg font-semibold text-white">{campaign.name}</h3>
-                                        <div className="text-sm text-gray-500">
-                                            Created {new Date(campaign.created_at).toLocaleDateString()}
-                                        </div>
-                                    </div>
+                            <div className="flex items-center justify-between mb-4">
+                                <div>
+                                    <h3 className="text-xl font-bold text-white">{campaign.name}</h3>
+                                    <div className="text-sm text-gray-500">Created {new Date(campaign.created_at).toLocaleDateString()}</div>
                                 </div>
                                 <div className="text-right">
-                                    <div className="text-2xl font-bold text-emerald-400">{campaign.amount} SOL</div>
-                                    <div className="text-xs text-gray-500">Available to claim</div>
+                                    <div className="text-2xl font-bold text-emerald-400">
+                                        {campaign.amount} {campaign.token_symbol || "SOL"}
+                                    </div>
+                                    <div className="text-sm text-gray-500">Available to claim</div>
                                 </div>
                             </div>
 
-                            <div className="mt-4 pt-4 border-t border-white/5 flex items-center justify-between">
-                                <div className="flex items-center gap-4 text-sm text-gray-500">
+                            <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-4 text-sm text-gray-400">
                                     <span>{campaign.total_recipients} recipients</span>
                                     <span>•</span>
-                                    <span>{campaign.total_amount} SOL total</span>
+                                    <span>{campaign.total_amount} {campaign.token_symbol || "SOL"} total</span>
                                 </div>
                                 <button
                                     onClick={() => handleClaim(campaign)}
                                     disabled={loading}
-                                    className="px-6 py-2.5 bg-gradient-to-r from-violet-600 to-fuchsia-600 hover:from-violet-500 hover:to-fuchsia-500 disabled:opacity-50 text-white font-medium rounded-xl transition-all flex items-center gap-2"
+                                    className="px-6 py-2.5 bg-gradient-to-r from-violet-600 to-fuchsia-600 hover:from-violet-500 hover:to-fuchsia-500 disabled:opacity-50 text-white font-medium rounded-xl transition-all flex items-center gap-2 cursor-pointer disabled:cursor-not-allowed"
                                 >
                                     {claimingId === campaign.address ? (
                                         <>
@@ -1360,7 +1729,8 @@ function ManageCampaigns({ onViewCreate, systemStatus: _systemStatus }: { onView
                 const transformed = data.map(c => ({
                     name: c.name,
                     recipients: c.total_recipients,
-                    amount: `${c.total_amount} SOL`,
+                    amount: c.total_amount,
+                    tokenSymbol: c.token_symbol,
                     created: new Date(c.created_at).toLocaleDateString(),
                     status: "active",
                     claimed: c.claimed_count,
@@ -1437,7 +1807,7 @@ function ManageCampaigns({ onViewCreate, systemStatus: _systemStatus }: { onView
                                                 </code>
                                                 <button
                                                     onClick={() => handleCopy(campaign.address)}
-                                                    className="p-1 hover:bg-white/10 rounded transition-all"
+                                                    className="p-1 hover:bg-white/10 rounded transition-all cursor-pointer"
                                                 >
                                                     {copiedId === campaign.address ? (
                                                         <Check className="w-3 h-3 text-emerald-400" />
@@ -1481,14 +1851,16 @@ function ManageCampaigns({ onViewCreate, systemStatus: _systemStatus }: { onView
                                     <div className="text-xs text-gray-500 mt-1">Claim Rate</div>
                                 </div>
                                 <div className="bg-white/[0.02] rounded-xl p-4 text-center">
-                                    <div className="text-2xl font-bold text-white">{campaign.amount}</div>
-                                    <div className="text-xs text-gray-500 mt-1">Total SOL</div>
+                                    <div className="text-2xl font-bold text-white">
+                                        {campaign.amount} <span className="text-sm text-gray-400">{campaign.tokenSymbol || "SOL"}</span>
+                                    </div>
+                                    <div className="text-xs text-gray-500 mt-1">Total {campaign.tokenSymbol || "SOL"}</div>
                                 </div>
                                 <div className="bg-white/[0.02] rounded-xl p-4 text-center">
                                     <div className="text-2xl font-bold text-emerald-400">
                                         {(parseFloat(campaign.amount) * (campaign.claimed / campaign.recipients)).toFixed(2)}
                                     </div>
-                                    <div className="text-xs text-gray-500 mt-1">SOL Distributed</div>
+                                    <div className="text-xs text-gray-500 mt-1">{campaign.tokenSymbol || "SOL"} Distributed</div>
                                 </div>
                             </div>
 
@@ -1530,7 +1902,7 @@ function ManageCampaigns({ onViewCreate, systemStatus: _systemStatus }: { onView
                             <div className="px-6 pb-6 flex items-center gap-3">
                                 <button
                                     onClick={() => handleCopy(campaign.address)}
-                                    className="flex-1 px-4 py-3 bg-white/5 hover:bg-white/10 border border-white/10 text-white font-medium rounded-xl transition-all flex items-center justify-center gap-2"
+                                    className="flex-1 px-4 py-3 bg-white/5 hover:bg-white/10 border border-white/10 text-white font-medium rounded-xl transition-all flex items-center justify-center gap-2 cursor-pointer"
                                 >
                                     {copiedId === campaign.address ? (
                                         <>
@@ -1550,7 +1922,7 @@ function ManageCampaigns({ onViewCreate, systemStatus: _systemStatus }: { onView
                                         navigator.clipboard.writeText(shareText);
                                         handleCopy('share_' + campaign.address);
                                     }}
-                                    className="px-4 py-3 bg-white/5 hover:bg-white/10 border border-white/10 text-white font-medium rounded-xl transition-all flex items-center gap-2"
+                                    className="px-4 py-3 bg-white/5 hover:bg-white/10 border border-white/10 text-white font-medium rounded-xl transition-all flex items-center gap-2 cursor-pointer"
                                 >
                                     <Gift className="w-4 h-4" />
                                     <span>Share</span>
@@ -1560,7 +1932,7 @@ function ManageCampaigns({ onViewCreate, systemStatus: _systemStatus }: { onView
                                         href={`https://explorer.solana.com/tx/${campaign.signature}?cluster=custom&customUrl=http://localhost:8899`}
                                         target="_blank"
                                         rel="noopener noreferrer"
-                                        className="px-4 py-3 bg-gradient-to-r from-violet-600 to-fuchsia-600 hover:from-violet-500 hover:to-fuchsia-500 text-white font-medium rounded-xl transition-all flex items-center gap-2"
+                                        className="px-4 py-3 bg-gradient-to-r from-violet-600 to-fuchsia-600 hover:from-violet-500 hover:to-fuchsia-500 text-white font-medium rounded-xl transition-all flex items-center gap-2 cursor-pointer"
                                     >
                                         <ExternalLink className="w-4 h-4" />
                                         <span>Explorer</span>

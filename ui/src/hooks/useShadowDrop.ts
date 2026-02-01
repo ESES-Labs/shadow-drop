@@ -3,14 +3,23 @@ import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import { PublicKey } from "@solana/web3.js";
 import { useMemo } from "react";
 import idl from "../idl.json";
+import { useNetwork } from "../providers/NetworkProvider";
 
-// Program ID from environment variable or hardcoded fallback
-const PROGRAM_ID_STRING = import.meta.env.VITE_PROGRAM_ID || "7wjDqUQUpnudD25MELXBiayNiMrStXaKAdrLMwzccu7v";
-export const PROGRAM_ID = new PublicKey(PROGRAM_ID_STRING);
+// Network-specific Program IDs from environment variables
+const PROGRAM_IDS = {
+    localnet: import.meta.env.VITE_PROGRAM_ID_LOCALNET || "7wjDqUQUpnudD25MELXBiayNiMrStXaKAdrLMwzccu7v",
+    devnet: import.meta.env.VITE_PROGRAM_ID_DEVNET || "YOUR_DEVNET_PROGRAM_ID",
+    mainnet: import.meta.env.VITE_PROGRAM_ID_MAINNET || "YOUR_MAINNET_PROGRAM_ID",
+};
 
 export function useShadowDrop() {
     const { connection } = useConnection();
     const wallet = useWallet();
+    const { network } = useNetwork();
+
+    // Get program ID based on current network
+    const programIdString = PROGRAM_IDS[network] || PROGRAM_IDS.localnet;
+    const PROGRAM_ID = useMemo(() => new PublicKey(programIdString), [programIdString]);
 
     const program = useMemo(() => {
         if (!wallet.publicKey) return null;
@@ -29,7 +38,8 @@ export function useShadowDrop() {
         programId: PROGRAM_ID,
         connected: wallet.connected,
         publicKey: wallet.publicKey,
-        connection
+        connection,
+        network
     };
 }
 
@@ -46,3 +56,4 @@ export function hexToBytes(hex: string): Uint8Array {
     }
     return bytes;
 }
+

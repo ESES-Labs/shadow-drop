@@ -3,6 +3,10 @@
 
 use anchor_lang::prelude::*;
 use anchor_lang::system_program;
+use anchor_spl::{
+    token::{self, Token, TokenAccount, Mint, Transfer as SplTransfer},
+    associated_token::AssociatedToken,
+};
 use light_sdk::{
     account::LightAccount,
     address::v2::derive_address,
@@ -69,6 +73,10 @@ pub mod shadow_drop {
         campaign.campaign_id = id_bytes;
         campaign.campaign_id_len = id_len as u8;
 
+        // SOL campaign - no token mint
+        campaign.token_mint = None;
+        campaign.token_vault = None;
+
         // Transfer SOL from authority to vault PDA
         system_program::transfer(
             CpiContext::new(
@@ -81,7 +89,7 @@ pub mod shadow_drop {
             total_amount,
         )?;
 
-        msg!("Campaign created with {} lamports, vesting_duration: {}s", total_amount, vesting_duration);
+        msg!("SOL Campaign created with {} lamports, vesting_duration: {}s", total_amount, vesting_duration);
         Ok(())
     }
 
@@ -295,6 +303,146 @@ pub mod shadow_drop {
         msg!("Campaign closed, {} lamports returned", remaining);
         Ok(())
     }
+
+    /// Create a new token airdrop campaign
+    /// Uses SPL Token for token distribution
+    pub fn create_token_campaign(
+        ctx: Context<CreateTokenCampaign>,
+        campaign_id: String,
+        merkle_root: [u8; 32],
+        total_amount: u64,
+        vesting_start: i64,
+        vesting_cliff: i64,
+        vesting_duration: i64,
+    ) -> Result<()> {
+        require!(campaign_id.len() <= 32, ShadowDropError::CampaignIdTooLong);
+        require!(total_amount > 0, ShadowDropError::InvalidAmount);
+
+        let campaign = &mut ctx.accounts.campaign;
+        campaign.authority = ctx.accounts.authority.key();
+        campaign.merkle_root = merkle_root;
+        campaign.total_amount = total_amount;
+        campaign.claimed_amount = 0;
+        campaign.total_claims = 0;
+        campaign.is_active = true;
+        campaign.bump = ctx.bumps.campaign;
+        campaign.vault_bump = 0; // Not used for token campaigns
+        
+        // Vesting config
+        campaign.vesting_start = if vesting_start == 0 {
+            Clock::get()?.unix_timestamp
+        } else {
+            vesting_start
+        };
+        campaign.vesting_cliff = vesting_cliff;
+        campaign.vesting_duration = vesting_duration;
+        
+        // Store campaign_id
+        let mut id_bytes = [0u8; 32];
+        let id_len = campaign_id.len().min(32);
+        id_bytes[..id_len].copy_from_slice(&campaign_id.as_bytes()[..id_len]);
+        campaign.campaign_id = id_bytes;
+        campaign.campaign_id_len = id_len as u8;
+
+        // Token campaign - store mint and vault
+        campaign.token_mint = Some(ctx.accounts.token_mint.key());
+        campaign.token_vault = Some(ctx.accounts.token_vault.key());
+
+        // Transfer tokens from authority's token account to vault
+        token::transfer(
+            CpiContext::new(
+                ctx.accounts.token_program.to_account_info(),
+                SplTransfer {
+                    from: ctx.accounts.authority_token_account.to_account_info(),
+                    to: ctx.accounts.token_vault.to_account_info(),
+                    authority: ctx.accounts.authority.to_account_info(),
+                },
+            ),
+            total_amount,
+        )?;
+
+        msg!("Token Campaign created with {} tokens, mint: {}", total_amount, ctx.accounts.token_mint.key());
+        Ok(())
+    }
+
+    /// Claim tokens from a token campaign (legacy flow)
+    pub fn claim_token(ctx: Context<ClaimToken>, claim_amount: u64) -> Result<()> {
+        let campaign = &mut ctx.accounts.campaign;
+        
+        require!(campaign.is_active, ShadowDropError::CampaignNotActive);
+        require!(campaign.token_mint.is_some(), ShadowDropError::NotTokenCampaign);
+
+        // Calculate claimable amount based on vesting schedule
+        let now = Clock::get()?.unix_timestamp;
+        let vested_amount = if campaign.vesting_duration == 0 {
+            claim_amount
+        } else {
+            let cliff_end = campaign.vesting_start + campaign.vesting_cliff;
+            if now < cliff_end {
+                return Err(ShadowDropError::VestingCliffNotReached.into());
+            }
+            
+            let vesting_end = campaign.vesting_start + campaign.vesting_duration;
+            let elapsed = now - campaign.vesting_start;
+            
+            if now >= vesting_end {
+                claim_amount
+            } else {
+                (claim_amount as i128 * elapsed as i128 / campaign.vesting_duration as i128) as u64
+            }
+        };
+
+        require!(vested_amount > 0, ShadowDropError::NothingToVest);
+        require!(
+            campaign.claimed_amount + vested_amount <= campaign.total_amount,
+            ShadowDropError::InsufficientFunds
+        );
+
+        // Mark claim in claim record
+        let claim_record = &mut ctx.accounts.claim_record;
+        require!(!claim_record.claimed, ShadowDropError::AlreadyClaimed);
+        
+        claim_record.campaign = campaign.key();
+        claim_record.claimer = ctx.accounts.claimer.key();
+        claim_record.amount = vested_amount;
+        claim_record.claimed = true;
+        claim_record.claimed_at = now;
+
+        // Update campaign stats
+        campaign.claimed_amount += vested_amount;
+        campaign.total_claims += 1;
+
+        // Transfer tokens from vault to claimer using campaign PDA as signer
+        let authority_key = campaign.authority;
+        let id_len = campaign.campaign_id_len as usize;
+        // Copy to avoid borrow checker issues
+        let mut campaign_id_copy = [0u8; 32];
+        campaign_id_copy[..id_len].copy_from_slice(&campaign.campaign_id[..id_len]);
+        let campaign_bump = campaign.bump;
+        
+        let campaign_seeds: &[&[u8]] = &[
+            b"campaign",
+            authority_key.as_ref(),
+            &campaign_id_copy[..id_len],
+            &[campaign_bump],
+        ];
+
+        token::transfer(
+            CpiContext::new_with_signer(
+                ctx.accounts.token_program.to_account_info(),
+                SplTransfer {
+                    from: ctx.accounts.token_vault.to_account_info(),
+                    to: ctx.accounts.claimer_token_account.to_account_info(),
+                    authority: ctx.accounts.campaign.to_account_info(),
+                },
+                &[campaign_seeds],
+            ),
+            vested_amount,
+        )?;
+
+        msg!("Token claim successful: {} tokens to {}", vested_amount, ctx.accounts.claimer.key());
+        Ok(())
+    }
 }
 
 // ============================================================================
@@ -327,6 +475,9 @@ pub struct Campaign {
     pub vesting_start: i64,      // Unix timestamp when vesting starts (0 = instant)
     pub vesting_cliff: i64,      // Cliff period in seconds
     pub vesting_duration: i64,   // Total vesting duration in seconds
+    // Token fields (None = SOL campaign)
+    pub token_mint: Option<Pubkey>,    // Token mint address (None = SOL)
+    pub token_vault: Option<Pubkey>,   // Token vault ATA address
 }
 
 #[account]
@@ -351,7 +502,11 @@ pub struct CreateCampaign<'info> {
     #[account(
         init,
         payer = authority,
-        space = 8 + 32 + 32 + 8 + 8 + 8 + 1 + 1 + 1 + 32 + 1 + 8 + 8 + 8, // +24 for vesting
+        // 8 discriminator + 32 authority + 32 merkle_root + 8 total + 8 claimed + 8 claims
+        // + 1 is_active + 1 bump + 1 vault_bump + 32 campaign_id + 1 id_len
+        // + 8 vesting_start + 8 cliff + 8 duration
+        // + 33 token_mint (Option<Pubkey>) + 33 token_vault (Option<Pubkey>)
+        space = 8 + 32 + 32 + 8 + 8 + 8 + 1 + 1 + 1 + 32 + 1 + 8 + 8 + 8 + 33 + 33,
         seeds = [b"campaign", authority.key().as_ref(), campaign_id.as_bytes()],
         bump
     )]
@@ -428,6 +583,95 @@ pub struct CloseCampaign<'info> {
     pub vault: AccountInfo<'info>,
 }
 
+/// Create token campaign context
+#[derive(Accounts)]
+#[instruction(campaign_id: String)]
+pub struct CreateTokenCampaign<'info> {
+    #[account(mut)]
+    pub authority: Signer<'info>,
+
+    #[account(
+        init,
+        payer = authority,
+        space = 8 + 32 + 32 + 8 + 8 + 8 + 1 + 1 + 1 + 32 + 1 + 8 + 8 + 8 + 33 + 33,
+        seeds = [b"campaign", authority.key().as_ref(), campaign_id.as_bytes()],
+        bump
+    )]
+    pub campaign: Account<'info, Campaign>,
+
+    /// Token mint for this campaign
+    pub token_mint: Account<'info, Mint>,
+
+    /// Token vault (ATA owned by campaign PDA)
+    #[account(
+        init_if_needed,
+        payer = authority,
+        associated_token::mint = token_mint,
+        associated_token::authority = campaign,
+    )]
+    pub token_vault: Account<'info, TokenAccount>,
+
+    /// Authority's token account to transfer from
+    #[account(
+        mut,
+        constraint = authority_token_account.mint == token_mint.key(),
+        constraint = authority_token_account.owner == authority.key(),
+    )]
+    pub authority_token_account: Account<'info, TokenAccount>,
+
+    pub token_program: Program<'info, Token>,
+    pub associated_token_program: Program<'info, AssociatedToken>,
+    pub system_program: Program<'info, System>,
+}
+
+/// Token claim context
+#[derive(Accounts)]
+pub struct ClaimToken<'info> {
+    #[account(mut)]
+    pub claimer: Signer<'info>,
+
+    #[account(
+        mut,
+        constraint = campaign.token_mint.is_some() @ ShadowDropError::NotTokenCampaign,
+    )]
+    pub campaign: Account<'info, Campaign>,
+
+    /// Token vault (owned by campaign PDA)
+    #[account(
+        mut,
+        constraint = Some(token_vault.key()) == campaign.token_vault,
+    )]
+    pub token_vault: Account<'info, TokenAccount>,
+
+    /// Claimer's token account to receive tokens
+    #[account(
+        init_if_needed,
+        payer = claimer,
+        associated_token::mint = token_mint,
+        associated_token::authority = claimer,
+    )]
+    pub claimer_token_account: Account<'info, TokenAccount>,
+
+    /// Token mint
+    #[account(
+        constraint = Some(token_mint.key()) == campaign.token_mint,
+    )]
+    pub token_mint: Account<'info, Mint>,
+
+    #[account(
+        init,
+        payer = claimer,
+        space = 8 + 32 + 32 + 8 + 1 + 8,
+        seeds = [b"claim", campaign.key().as_ref(), claimer.key().as_ref()],
+        bump
+    )]
+    pub claim_record: Account<'info, ClaimRecord>,
+
+    pub token_program: Program<'info, Token>,
+    pub associated_token_program: Program<'info, AssociatedToken>,
+    pub system_program: Program<'info, System>,
+}
+
 // ============================================================================
 // Errors
 // ============================================================================
@@ -450,4 +694,6 @@ pub enum ShadowDropError {
     VestingCliffNotReached,
     #[msg("Nothing to vest yet")]
     NothingToVest,
+    #[msg("Not a token campaign")]
+    NotTokenCampaign,
 }

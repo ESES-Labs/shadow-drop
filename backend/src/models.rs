@@ -31,6 +31,10 @@ pub struct Campaign {
     pub vesting_start: i64,   // Unix timestamp
     pub vesting_cliff_seconds: i64,
     pub vesting_duration_seconds: i64,
+    // Token fields (None = SOL campaign)
+    pub token_mint: Option<String>,
+    pub token_symbol: Option<String>,
+    pub token_decimals: Option<u8>,
 }
 
 /// Response for campaign info (without recipient list for privacy)
@@ -46,6 +50,10 @@ pub struct CampaignInfo {
     pub vault_address: Option<String>, // PDA vault address for claims
     pub tx_signature: Option<String>,
     pub created_at: DateTime<Utc>,
+    // Token fields (None = SOL campaign)
+    pub token_mint: Option<String>,
+    pub token_symbol: Option<String>,
+    pub token_decimals: Option<u8>,
 }
 
 impl From<&Campaign> for CampaignInfo {
@@ -61,6 +69,9 @@ impl From<&Campaign> for CampaignInfo {
             vault_address: campaign.vault_address.clone(),
             tx_signature: campaign.tx_signature.clone(),
             created_at: campaign.created_at,
+            token_mint: campaign.token_mint.clone(),
+            token_symbol: campaign.token_symbol.clone(),
+            token_decimals: campaign.token_decimals,
         }
     }
 }
@@ -83,6 +94,8 @@ pub struct EligibleCampaign {
     pub total_recipients: usize,
     pub vault_address: Option<String>,
     pub created_at: DateTime<Utc>,
+    pub token_symbol: Option<String>,
+    pub token_decimals: Option<u8>,
 }
 
 /// In-memory campaign store (can be replaced with database later)
@@ -174,6 +187,8 @@ impl CampaignStore {
                         total_recipients: campaign.recipients.len(),
                         vault_address: campaign.vault_address.clone(),
                         created_at: campaign.created_at,
+                        token_symbol: campaign.token_symbol.clone(),
+                        token_decimals: campaign.token_decimals,
                     })
             })
             .collect()

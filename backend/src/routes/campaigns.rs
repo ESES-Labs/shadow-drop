@@ -33,6 +33,13 @@ pub struct CreateCampaignRequest {
     pub vesting_cliff_seconds: Option<i64>,
     #[serde(default)]
     pub vesting_duration_seconds: Option<i64>,
+    // Token fields (optional, None = SOL campaign)
+    #[serde(default)]
+    pub token_mint: Option<String>,
+    #[serde(default)]
+    pub token_symbol: Option<String>,
+    #[serde(default)]
+    pub token_decimals: Option<u8>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -95,6 +102,10 @@ async fn create_campaign(
         vesting_start: body.vesting_start.unwrap_or(now),
         vesting_cliff_seconds: body.vesting_cliff_seconds.unwrap_or(0),
         vesting_duration_seconds: body.vesting_duration_seconds.unwrap_or(0),
+        // Token fields
+        token_mint: body.token_mint,
+        token_symbol: body.token_symbol,
+        token_decimals: body.token_decimals,
     };
 
     let created = state.campaign_store.create(campaign).await;
