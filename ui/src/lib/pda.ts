@@ -1,5 +1,5 @@
 import { PublicKey } from "@solana/web3.js";
-import { buildMerkleTree, generateSecret, toHex } from "./merkle";
+import { buildMerkleTree, toHex } from "./merkle";
 
 // Program ID
 export const PROGRAM_ID = new PublicKey("7wjDqUQUpnudD25MELXBiayNiMrStXaKAdrLMwzccu7v");
@@ -73,18 +73,11 @@ export function generateCampaignId(): string {
 }
 
 /**
- * Generate a proper merkle root from recipient list using Poseidon hashing
+ * Generate a proper merkle root from recipient list using Poseidon hashing (async)
  */
-export function generateMerkleRoot(recipients: { wallet: string; amount: number }[]): Uint8Array {
-    // Generate secrets for each recipient
-    const recipientsWithSecrets = recipients.map(r => ({
-        wallet: r.wallet,
-        amount: r.amount,
-        secret: generateSecret()
-    }));
-
-    // Build merkle tree
-    const { root } = buildMerkleTree(recipientsWithSecrets);
+export async function generateMerkleRoot(recipients: { wallet: string; amount: bigint }[]): Promise<Uint8Array> {
+    // Build merkle tree (secrets handled inside)
+    const { root } = await buildMerkleTree(recipients);
 
     return root;
 }

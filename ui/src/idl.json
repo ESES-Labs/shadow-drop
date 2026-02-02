@@ -2,7 +2,7 @@
   "address": "7wjDqUQUpnudD25MELXBiayNiMrStXaKAdrLMwzccu7v",
   "metadata": {
     "name": "shadow_drop",
-    "version": "0.0.3",
+    "version": "0.0.4",
     "spec": "0.1.0",
     "description": "Created with Anchor"
   },
@@ -405,7 +405,7 @@
           "type": {
             "array": [
               "u8",
-              256
+              388
             ]
           }
         },
@@ -482,7 +482,7 @@
           "type": {
             "array": [
               "u8",
-              256
+              388
             ]
           }
         },

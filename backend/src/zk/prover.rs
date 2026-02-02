@@ -133,7 +133,8 @@ impl SunspotProver {
         tracing::info!("Read {} bytes of public witness from .pw file", pw_bytes.len());
 
         Ok(ZkProofOutput {
-            proof: hex::encode(&proof_bytes[..GROTH16_PROOF_SIZE]),
+            // Send FULL proof file (388 bytes used by Gnark verifier with 1 commitment)
+            proof: hex::encode(&proof_bytes),
             // Send FULL .pw file (108 bytes), not just 96 bytes
             public_inputs: hex::encode(&pw_bytes[..expected_pw_size]),
             merkle_root: input.merkle_root,

@@ -19,7 +19,7 @@ pub struct CreateCampaignRequest {
     pub address: String,
     pub name: String,
     pub merkle_root: String,
-    pub total_amount: f64,
+    pub total_amount: String,
     pub creator_wallet: String,
     pub tx_signature: Option<String>,
     pub vault_address: Option<String>, // PDA vault address for claims
@@ -45,7 +45,7 @@ pub struct CreateCampaignRequest {
 #[derive(Debug, Deserialize)]
 pub struct RecipientInput {
     pub wallet: String,
-    pub amount: f64,
+    pub amount: String,
 }
 
 /// Request body for checking eligibility
@@ -106,7 +106,7 @@ async fn create_campaign(
         // Token fields
         token_mint: body.token_mint,
         token_symbol: body.token_symbol,
-        token_decimals: body.token_decimals,
+        token_decimals: body.token_decimals.map(|d| d as i16),
     };
 
     let created = state.campaign_store.create(campaign).await;

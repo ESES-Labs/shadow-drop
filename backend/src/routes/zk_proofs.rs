@@ -87,7 +87,7 @@ async fn generate_zk_proof(
     let secret = generate_secret();
 
     // Build merkle tree with secrets
-    let recipients_with_secrets: Vec<(String, f64, [u8; 32])> = campaign
+    let recipients_with_secrets: Vec<(String, u64, [u8; 32])> = campaign
         .recipients
         .iter()
         .map(|r| {
@@ -101,7 +101,8 @@ async fn generate_zk_proof(
                     recipient_secret[i % 32] ^= *b;
                 }
             }
-            (r.wallet.clone(), r.amount, recipient_secret)
+            let amount_u64 = r.amount.parse::<u64>().unwrap_or(0);
+            (r.wallet.clone(), amount_u64, recipient_secret)
         })
         .collect();
 
@@ -128,7 +129,7 @@ async fn generate_zk_proof(
         merkle_root: format!("0x{}", hex::encode(tree.root())),
         nullifier_hash: format!("0x{}", hex::encode(nullifier)),
         recipient: format!("0x{}", wallet_field),
-        amount: ((recipient.amount * 1_000_000_000.0) as u64).to_string(), // Convert to lamports
+        amount: recipient.amount.clone(), // Use raw string directly
         secret: format!("0x{}", hex::encode(secret)),
         leaf_index: proof.leaf_index as u64,
         merkle_path: proof
@@ -161,7 +162,7 @@ async fn generate_zk_proof(
                 ),
                 nullifier_hash: hex::encode(nullifier),
                 nullifier: hex::encode(nullifier),
-                amount: (recipient.amount * 1_000_000_000.0) as u64,
+                amount: recipient.amount.parse::<u64>().unwrap_or(0),
                 secret: hex::encode(secret),
                 merkle_root: hex::encode(tree.root()),
                 leaf_index: proof.leaf_index,
@@ -178,7 +179,7 @@ async fn generate_zk_proof(
                     public_inputs: zk_output.public_inputs,
                     nullifier_hash: hex::encode(nullifier),
                     nullifier: hex::encode(nullifier),
-                    amount: (recipient.amount * 1_000_000_000.0) as u64,
+                    amount: recipient.amount.parse::<u64>().unwrap_or(0),
                     secret: hex::encode(secret),
                     merkle_root: hex::encode(tree.root()),
                     leaf_index: proof.leaf_index,

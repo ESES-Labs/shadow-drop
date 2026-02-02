@@ -35,7 +35,7 @@ pub struct MerkleProof {
 
 impl MerkleTree {
     /// Build a merkle tree from recipient list
-    pub fn from_recipients(recipients: &[(String, f64, [u8; 32])]) -> Self {
+    pub fn from_recipients(recipients: &[(String, u64, [u8; 32])]) -> Self {
         let leaf_count = recipients.len();
         assert!(leaf_count <= MAX_LEAVES, "Too many recipients");
         
@@ -123,7 +123,7 @@ use taceo_poseidon2::bn254::t4 as poseidon2;
 
 /// Compute leaf hash: hash(recipient, amount, secret)
 /// Matches Noir circuit expectations: poseidon(recipient, amount, secret)
-pub fn compute_leaf_hash(wallet: &str, amount: f64, secret: &[u8; 32]) -> Hash {
+pub fn compute_leaf_hash(wallet: &str, amount: u64, secret: &[u8; 32]) -> Hash {
     // 1. Recipient (Wallet) -> Field Element
     // Must match `wallet_to_field` in zk_proofs.rs:
     // Decode Base58, take first 31 bytes, pad to 32 bytes (BE)
@@ -131,10 +131,6 @@ pub fn compute_leaf_hash(wallet: &str, amount: f64, secret: &[u8; 32]) -> Hash {
     if let Ok(decoded) = bs58::decode(wallet).into_vec() {
          let len = decoded.len().min(31);
          // Place at the end for proper BE integer representation (if we view it as a number)
-         // But checking zk_proofs.rs logic:
-         // field_bytes[32 - len..].copy_from_slice(&bytes[..len]);
-         // This creates [0, ..., byte0, byte1 ...]
-         // When read as BE number (Fr::from_be_bytes), this is correct.
          wallet_bytes[32 - len..].copy_from_slice(&decoded[..len]);
     } else {
         // Fallback for tests/non-base58 (like "wallet1")
@@ -145,8 +141,8 @@ pub fn compute_leaf_hash(wallet: &str, amount: f64, secret: &[u8; 32]) -> Hash {
     }
 
     // 2. Amount -> Field Element
-    // Convert to lamports (u64)
-    let amount_lamports = (amount * 1_000_000_000.0) as u64;
+    // Use raw u64 directly (already in correct units)
+    let amount_lamports = amount;
     // To read as correct integer in BE, put bytes at end.
     let mut amount_arr = [0u8; 32];
     amount_arr[24..32].copy_from_slice(&amount_lamports.to_be_bytes());
@@ -267,8 +263,8 @@ mod tests {
         let secret2 = generate_secret();
         
         let recipients = vec![
-            ("wallet1".to_string(), 1.0, secret1),
-            ("wallet2".to_string(), 2.0, secret2),
+            ("wallet1".to_string(), 1, secret1),
+            ("wallet2".to_string(), 2, secret2),
         ];
         
         let tree = MerkleTree::from_recipients(&recipients);

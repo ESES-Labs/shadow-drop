@@ -2,14 +2,14 @@ const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
 export interface RecipientInput {
     wallet: string;
-    amount: number;
+    amount: number | string;
 }
 
 export interface CreateCampaignRequest {
     address: string;
     name: string;
     merkle_root: string;
-    total_amount: number;
+    total_amount: number | string;
     creator_wallet: string;
     tx_signature?: string;
     vault_address?: string; // PDA vault address for claims
@@ -66,7 +66,7 @@ export interface ProofResponse {
  * ZK Proof response from Sunspot prover
  */
 export interface ZkProofResponse {
-    groth16_proof: string;      // 256 bytes hex
+    groth16_proof: string;      // 388 bytes hex (Proof + 1 Commitment)
     public_inputs: string;       // 108 bytes hex (12 header + 96 data)
     nullifier_hash: string;      // 32 bytes hex
     nullifier: string;           // 32 bytes hex (for contract)

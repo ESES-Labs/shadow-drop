@@ -1,229 +1,157 @@
-/**
- * Merkle tree implementation for frontend
- * Uses a Poseidon-like hash for ZK compatibility
- */
+import { PublicKey } from "@solana/web3.js";
 
+const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
 const TREE_DEPTH = 8;
 
 /**
- * Simple hash function matching backend
- * In production, use @lightprotocol/hasher.js for proper Poseidon
+ * Async Poseidon hash via Backend API
+ * Ensures 100% compatibility with Circuit
  */
-function poseidonHash2(a: Uint8Array, b: Uint8Array): Uint8Array {
-    // Simple hash combining both inputs
-    const combined = new Uint8Array(a.length + b.length + 9);
-    const prefix = new TextEncoder().encode("poseidon2");
-    combined.set(prefix, 0);
-    combined.set(a, prefix.length);
-    combined.set(b, prefix.length + a.length);
-    
-    return simpleHash(combined);
-}
+async function poseidonHash(inputs: bigint[]): Promise<bigint> {
+    // Convert BigInts to hex strings
+    // serialize BigInt to hex
+    const hexInputs = inputs.map(i => {
+        let hex = i.toString(16);
+        if (hex.length % 2 !== 0) hex = "0" + hex;
+        return hex; // Backend handles clean/0x prefix
+    });
 
-function poseidonHash3(a: Uint8Array, b: Uint8Array, c: Uint8Array): Uint8Array {
-    const combined = new Uint8Array(a.length + b.length + c.length + 9);
-    const prefix = new TextEncoder().encode("poseidon3");
-    combined.set(prefix, 0);
-    combined.set(a, prefix.length);
-    combined.set(b, prefix.length + a.length);
-    combined.set(c, prefix.length + a.length + b.length);
-    
-    return simpleHash(combined);
-}
+    const response = await fetch(`${API_URL}/api/v1/hash/poseidon`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ inputs: hexInputs })
+    });
 
-/**
- * Simple 32-byte hash using Web Crypto API (SHA-256-like)
- * For demo purposes - in production use proper Poseidon
- */
-function simpleHash(data: Uint8Array): Uint8Array {
-    // Use a simple deterministic hash
-    let h1 = 0x811c9dc5;
-    let h2 = 0x01000193;
-    let h3 = 0xdeadbeef;
-    let h4 = 0xcafebabe;
-    
-    for (let i = 0; i < data.length; i++) {
-        h1 ^= data[i];
-        h1 = Math.imul(h1, 0x01000193);
-        h2 ^= data[i];
-        h2 = Math.imul(h2, 0x811c9dc5);
-        h3 ^= data[i];
-        h3 = Math.imul(h3, 0x1b873593);
-        h4 ^= data[i];
-        h4 = Math.imul(h4, 0xcc9e2d51);
+    if (!response.ok) {
+        console.error("Hashing failed:", await response.text());
+        throw new Error("Poseidon Hash Failed");
     }
-    
-    // Create 32-byte result
-    const result = new Uint8Array(32);
-    const view = new DataView(result.buffer);
-    view.setUint32(0, h1 >>> 0, true);
-    view.setUint32(4, h2 >>> 0, true);
-    view.setUint32(8, h3 >>> 0, true);
-    view.setUint32(12, h4 >>> 0, true);
-    view.setUint32(16, (h1 ^ h2) >>> 0, true);
-    view.setUint32(20, (h2 ^ h3) >>> 0, true);
-    view.setUint32(24, (h3 ^ h4) >>> 0, true);
-    view.setUint32(28, (h4 ^ h1) >>> 0, true);
-    
-    return result;
+
+    const data = await response.json();
+    // data.hash is hex string
+    return BigInt("0x" + data.hash);
 }
 
 export interface Recipient {
     wallet: string;
-    amount: number;
+    amount: bigint;
     secret?: Uint8Array;
 }
 
-export interface MerkleProof {
-    leafIndex: number;
-    siblings: Uint8Array[];
-    leaf: Uint8Array;
-}
-
-/**
- * Compute leaf hash: hash(recipient, amount, secret)
- */
-export function computeLeafHash(wallet: string, amount: number, secret: Uint8Array): Uint8Array {
-    const walletBytes = new TextEncoder().encode(wallet);
-    const amountLamports = BigInt(Math.floor(amount * 1_000_000_000));
-    const amountBytes = new Uint8Array(8);
-    const amountView = new DataView(amountBytes.buffer);
-    amountView.setBigUint64(0, amountLamports, true);
-    
-    return poseidonHash3(walletBytes, amountBytes, secret);
-}
-
-/**
- * Compute nullifier: hash(secret, leaf_index)
- */
-export function computeNullifier(secret: Uint8Array, leafIndex: number): Uint8Array {
-    const indexBytes = new Uint8Array(8);
-    const view = new DataView(indexBytes.buffer);
-    view.setBigUint64(0, BigInt(leafIndex), true);
-    
-    return poseidonHash2(secret, indexBytes);
-}
-
-/**
- * Generate a random 32-byte secret
- */
 export function generateSecret(): Uint8Array {
     const secret = new Uint8Array(32);
     crypto.getRandomValues(secret);
+    secret[31] &= 0x1f; // Mask to fit field (~253 bits)
     return secret;
 }
 
-/**
- * Build merkle tree and return root
- */
-export function buildMerkleTree(recipients: Recipient[]): {
+export async function computeLeafHash(wallet: string, amount: bigint, secret: Uint8Array): Promise<Uint8Array> {
+    const walletPubkey = new PublicKey(wallet);
+    const walletBn = BigInt("0x" + walletPubkey.toBuffer().toString("hex"));
+    // Send full wallet address (Backend/Noir will handle Field Modulo reduction)
+    // const walletMasked = walletBn & ((1n << 253n) - 1n); 
+
+    const amountLamports = amount;
+    const secretBn = BigInt("0x" + Buffer.from(secret).toString("hex"));
+
+    const hash = await poseidonHash([walletBn, amountLamports, secretBn]);
+    return bigIntToBytes(hash);
+}
+
+export async function computeNullifier(secret: Uint8Array, leafIndex: number): Promise<Uint8Array> {
+    const secretBn = BigInt("0x" + Buffer.from(secret).toString("hex"));
+    const indexBn = BigInt(leafIndex);
+    const hash = await poseidonHash([secretBn, indexBn]);
+    return bigIntToBytes(hash);
+}
+
+export async function buildMerkleTree(recipients: Recipient[]): Promise<{
     root: Uint8Array;
     leaves: Uint8Array[];
-    tree: Uint8Array[][];
-} {
-    // Assign secrets if not provided
+    // We don't return full tree usually, just root and computed leaves
+}> {
+    // 1. Assign secrets
     const recipientsWithSecrets = recipients.map(r => ({
         ...r,
         secret: r.secret || generateSecret()
     }));
-    
-    // Compute leaves
-    const leaves = recipientsWithSecrets.map(r => 
-        computeLeafHash(r.wallet, r.amount, r.secret!)
-    );
-    
-    // Pad to power of 2
+
+    // 2. Compute Leaves Async
+    // Using Promise.all for parallelism
+    const leavesBn: bigint[] = await Promise.all(recipientsWithSecrets.map(async r => {
+        const leafBytes = await computeLeafHash(r.wallet, r.amount, r.secret!);
+        return BigInt("0x" + Buffer.from(leafBytes).toString("hex"));
+    }));
+
+    // 3. Pad tree with zeros
     const paddedSize = 1 << TREE_DEPTH;
-    while (leaves.length < paddedSize) {
-        leaves.push(new Uint8Array(32));
+    while (leavesBn.length < paddedSize) {
+        leavesBn.push(0n);
     }
-    
-    // Build tree bottom-up
-    const tree: Uint8Array[][] = [leaves];
-    let currentLevel = leaves;
-    
+
+    // 4. Build Tree
+    let currentLevel = leavesBn;
+    // We don't need to store full tree for frontend usually, just root implies we build it
+
     for (let i = 0; i < TREE_DEPTH; i++) {
-        const nextLevel: Uint8Array[] = [];
+        const nextLevel: bigint[] = [];
+        // Process pairs
+        // Can be parallelized per level
+        // For simplicity, sequential pairs, but parallel fetch?
+        // This might flood backend. 
+        // 128 + 64 + ... requests.
+
+        // Let's do batching manually: Promise.all for the level
+        const levelPromises: Promise<bigint>[] = [];
         for (let j = 0; j < currentLevel.length; j += 2) {
-            const parent = poseidonHash2(currentLevel[j], currentLevel[j + 1]);
-            nextLevel.push(parent);
+            levelPromises.push(poseidonHash([currentLevel[j], currentLevel[j + 1]]));
         }
-        tree.push(nextLevel);
+        nextLevel.push(...await Promise.all(levelPromises));
         currentLevel = nextLevel;
     }
-    
+
+    const rootBn = currentLevel[0];
+
+    // We also need to return "leaves" (Uint8Array[])
+    const leavesBytes = leavesBn.map(bn => bigIntToBytes(bn));
+
     return {
-        root: currentLevel[0],
-        leaves: tree[0],
-        tree
+        root: bigIntToBytes(rootBn),
+        leaves: leavesBytes
     };
 }
 
-/**
- * Get merkle proof for a leaf
- */
-export function getMerkleProof(tree: Uint8Array[][], leafIndex: number): MerkleProof {
-    const siblings: Uint8Array[] = [];
-    let idx = leafIndex;
-    
-    for (let i = 0; i < TREE_DEPTH; i++) {
-        const siblingIdx = idx % 2 === 0 ? idx + 1 : idx - 1;
-        siblings.push(tree[i][siblingIdx]);
-        idx = Math.floor(idx / 2);
+// Helper
+function bigIntToBytes(bn: bigint): Uint8Array {
+    let hex = bn.toString(16);
+    if (hex.length % 2 !== 0) hex = "0" + hex;
+    const len = 32;
+    const needed = len * 2;
+    hex = hex.padStart(needed, "0");
+
+    // Uint8Array from hex
+    const bytes = new Uint8Array(32);
+    for (let i = 0; i < 32 && i * 2 < hex.length; i++) {
+        // Parse from end or start? Big Endian usually.
+        // fromHex standard:
+        const byteVal = parseInt(hex.substring(i * 2, i * 2 + 2), 16);
+        bytes[i] = byteVal;
     }
-    
-    return {
-        leafIndex,
-        siblings,
-        leaf: tree[0][leafIndex]
-    };
+    return bytes;
 }
 
-/**
- * Verify a merkle proof
- */
-export function verifyMerkleProof(
-    root: Uint8Array,
-    leaf: Uint8Array,
-    leafIndex: number,
-    siblings: Uint8Array[]
-): boolean {
-    let current = leaf;
-    let idx = leafIndex;
-    
-    for (let i = 0; i < siblings.length; i++) {
-        const isRight = idx % 2 === 1;
-        if (isRight) {
-            current = poseidonHash2(siblings[i], current);
-        } else {
-            current = poseidonHash2(current, siblings[i]);
-        }
-        idx = Math.floor(idx / 2);
-    }
-    
-    // Compare roots
-    for (let i = 0; i < 32; i++) {
-        if (current[i] !== root[i]) return false;
-    }
-    return true;
-}
-
-/**
- * Convert Uint8Array to hex string
- */
 export function toHex(bytes: Uint8Array): string {
     return Array.from(bytes)
         .map(b => b.toString(16).padStart(2, '0'))
         .join('');
 }
 
-/**
- * Convert hex string to Uint8Array
- */
 export function fromHex(hex: string): Uint8Array {
     const bytes = new Uint8Array(hex.length / 2);
     for (let i = 0; i < bytes.length; i++) {
-        bytes[i] = parseInt(hex.substr(i * 2, 2), 16);
+        bytes[i] = parseInt(hex.substring(i * 2, i * 2 + 2), 16);
     }
     return bytes;
 }
+
+// Unused synchronous dummy functions removed

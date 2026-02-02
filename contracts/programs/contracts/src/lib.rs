@@ -20,8 +20,8 @@ use light_sdk::{
 
 declare_id!("7wjDqUQUpnudD25MELXBiayNiMrStXaKAdrLMwzccu7v");
 
-/// Groth16 proof size: 2 G1 points (64 bytes each) + 1 G2 point (128 bytes) = 256 bytes
-pub const GROTH16_PROOF_SIZE: usize = 256;
+/// Groth16 proof size: 256 (A,B,C) + 4 (num_com) + 64 (commitment) + 64 (pok) = 388 bytes
+pub const GROTH16_PROOF_SIZE: usize = 388;
 
 /// Public inputs size: 12-byte header + 3 Field elements (merkle_root, nullifier_hash, recipient)
 /// gnark-solana verifier expects full .pw file format: 12 + (3 * 32) = 108 bytes
@@ -346,7 +346,7 @@ pub mod shadow_drop {
         ctx: Context<ClaimZkSimple>,
         // Groth16 proof (256 bytes)
         groth16_proof: [u8; GROTH16_PROOF_SIZE],
-        // Public inputs: merkle_root (32) + nullifier_hash (32) + recipient (32)
+        // Public inputs: header(12) + merkle_root(32) + nullifier_hash(32) + recipient(32)
         public_inputs: [u8; PUBLIC_INPUTS_SIZE],
         // Nullifier for double-claim prevention
         nullifier: [u8; 32],
@@ -388,15 +388,21 @@ pub mod shadow_drop {
         // Step 2: Validate public inputs match campaign data
         // =======================================================================
 
-        // Extract merkle_root from public inputs (first 32 bytes)
-        let proof_merkle_root: [u8; 32] = public_inputs[0..32].try_into().unwrap();
+        // Public inputs layout from .pw file:
+        // [0..12]   : Header (4 bytes num inputs + 8 bytes padding)
+        // [12..44]  : Merkle Root
+        // [44..76]  : Nullifier Hash
+        // [76..108] : Recipient (Wallet)
+
+        // Extract merkle_root from public inputs (skip 12-byte header)
+        let proof_merkle_root: [u8; 32] = public_inputs[12..44].try_into().unwrap();
         require!(
             proof_merkle_root == campaign.merkle_root,
             ShadowDropError::InvalidMerkleRoot
         );
 
-        // Extract nullifier_hash from public inputs (bytes 32-64)
-        let proof_nullifier: [u8; 32] = public_inputs[32..64].try_into().unwrap();
+        // Extract nullifier_hash from public inputs
+        let proof_nullifier: [u8; 32] = public_inputs[44..76].try_into().unwrap();
         require!(
             proof_nullifier == nullifier,
             ShadowDropError::InvalidNullifier
@@ -451,6 +457,113 @@ pub mod shadow_drop {
         )?;
 
         msg!("🎉 ZK-verified claim successful: {} lamports to {}", claim_amount, ctx.accounts.claimer.key());
+        Ok(())
+    }
+
+    /// Claim SPL tokens using ZK Proof (Simple Nullified, no Vesting for MVP)
+    pub fn claim_zk_token(
+        ctx: Context<ClaimZkToken>,
+        groth16_proof: [u8; 388],
+        public_inputs: [u8; 108],
+        nullifier: [u8; 32],
+        claim_amount: u64,
+    ) -> Result<()> {
+        let campaign = &mut ctx.accounts.campaign;
+        let nullifier_record = &mut ctx.accounts.nullifier_record;
+
+        // 1. Basic Checks
+        require!(campaign.is_active, ShadowDropError::CampaignNotActive);
+        // require!(!nullifier_record.claimed, ShadowDropError::AlreadyClaimed); // Implied by account init
+        require!(
+            campaign.claimed_amount + claim_amount <= campaign.total_amount,
+            ShadowDropError::InsufficientFunds
+        );
+
+        // 2. Verify ZK Proof (CPI to Sunspot Verifier)
+        // Public inputs must be validated against campaign state to prevent replay
+        
+        // Create CPI instruction to verifier program
+        let verify_ix = Instruction {
+            program_id: ctx.accounts.zk_verifier.key(),
+            accounts: vec![],  // Sunspot verifier doesn't need accounts
+            data: {
+                 let mut verify_data = Vec::with_capacity(388 + 108);
+                 verify_data.extend_from_slice(&groth16_proof);
+                 verify_data.extend_from_slice(&public_inputs);
+                 verify_data
+            },
+        };
+
+        anchor_lang::solana_program::program::invoke(
+            &verify_ix,
+            &[ctx.accounts.zk_verifier.to_account_info()],
+        )?;
+
+        msg!("✅ Groth16 ZK proof verified on-chain!");
+
+        // 3. Verify Public Inputs
+        // [0..12] Header
+        // [12..44] Merkle Root
+        // [44..76] Nullifier Hash
+        // [76..108] Recipient
+        
+        // Check Merkle Root
+        let proof_merkle_root: [u8; 32] = public_inputs[12..44].try_into().unwrap();
+        require!(proof_merkle_root == campaign.merkle_root, ShadowDropError::InvalidMerkleRoot);
+
+        // Check Nullifier Hash (Matches passed nullifier)
+        let proof_nullifier: [u8; 32] = public_inputs[44..76].try_into().unwrap();
+        require!(proof_nullifier == nullifier, ShadowDropError::InvalidNullifier);
+
+        // Check Recipient (Prevent stealing proof)
+        // Convert signer key to field element bytes (BE padding at start of 32 bytes)
+        // Same logic as backend: take first 31 bytes, place at end (Big Endian) 
+        // Backend: `field_bytes[32-len..].copy_from_slice(&bytes[..len])` (bytes at END)
+        let mut claimer_field_bytes = [0u8; 32];
+        let claimer_pubkey_bytes = ctx.accounts.claimer.key().to_bytes();
+        // Use first 31 bytes of pubkey
+        claimer_field_bytes[1..].copy_from_slice(&claimer_pubkey_bytes[0..31]);
+        
+        let proof_recipient: [u8; 32] = public_inputs[76..108].try_into().unwrap();
+        // STRICT CHECK:
+        require!(
+            proof_recipient == claimer_field_bytes, 
+            ShadowDropError::Unauthorized // Proof recipient does not match signer
+        );
+
+        // 4. Update State
+        campaign.claimed_amount += claim_amount;
+        campaign.total_claims += 1;
+
+        nullifier_record.campaign = campaign.key();
+        nullifier_record.nullifier = nullifier;
+        nullifier_record.claimer = ctx.accounts.claimer.key();
+        nullifier_record.claimed_at = Clock::get()?.unix_timestamp;
+        // nullifier_record.claimed = true; // Implied by existence
+
+        // 5. Transfer Tokens
+        let seeds = &[
+            b"campaign",
+            campaign.authority.as_ref(), // Authority stored in campaign
+            &campaign.campaign_id[..campaign.campaign_id_len as usize],
+            &[campaign.bump],
+        ];
+        let signer = &[&seeds[..]];
+
+        token::transfer(
+            CpiContext::new_with_signer(
+                ctx.accounts.token_program.to_account_info(),
+                token::Transfer {
+                    from: ctx.accounts.token_vault.to_account_info(),
+                    to: ctx.accounts.claimer_token_account.to_account_info(),
+                    authority: campaign.to_account_info(),
+                },
+                signer,
+            ),
+            claim_amount,
+        )?;
+
+        msg!("🎉 ZK-verified Token Claim successful: {} tokens to {}", claim_amount, ctx.accounts.claimer.key());
         Ok(())
     }
 
@@ -837,7 +950,7 @@ pub struct ClaimZkVerified<'info> {
 
 /// Simplified ZK claim context - uses Sunspot verifier + PDA nullifier
 #[derive(Accounts)]
-#[instruction(groth16_proof: [u8; 256], public_inputs: [u8; 96], nullifier: [u8; 32])]
+#[instruction(groth16_proof: [u8; 388], public_inputs: [u8; 108], nullifier: [u8; 32])]
 pub struct ClaimZkSimple<'info> {
     #[account(mut)]
     pub claimer: Signer<'info>,
@@ -862,6 +975,59 @@ pub struct ClaimZkSimple<'info> {
     )]
     pub nullifier_record: Account<'info, NullifierRecord>,
 
+    pub system_program: Program<'info, System>,
+}
+
+/// Simplified ZK claim context for Token Campaign
+#[derive(Accounts)]
+#[instruction(groth16_proof: [u8; 388], public_inputs: [u8; 108], nullifier: [u8; 32])]
+pub struct ClaimZkToken<'info> {
+    #[account(mut)]
+    pub claimer: Signer<'info>,
+
+    #[account(
+        mut,
+        constraint = campaign.token_mint.is_some() @ ShadowDropError::NotTokenCampaign,
+    )]
+    pub campaign: Account<'info, Campaign>,
+
+    /// Token vault (owned by campaign PDA)
+    #[account(
+        mut,
+        constraint = Some(token_vault.key()) == campaign.token_vault,
+    )]
+    pub token_vault: Account<'info, TokenAccount>,
+
+    /// Claimer's token account to receive tokens
+    #[account(
+        init_if_needed,
+        payer = claimer,
+        associated_token::mint = token_mint,
+        associated_token::authority = claimer,
+    )]
+    pub claimer_token_account: Account<'info, TokenAccount>,
+
+    /// Token mint
+    #[account(
+        constraint = Some(token_mint.key()) == campaign.token_mint,
+    )]
+    pub token_mint: Account<'info, Mint>,
+
+    /// CHECK: Sunspot Groth16 verifier program
+    pub zk_verifier: AccountInfo<'info>,
+
+    /// PDA-based nullifier record (prevents double-claim)
+    #[account(
+        init,
+        payer = claimer,
+        space = 8 + 32 + 32 + 32 + 8,
+        seeds = [b"nullifier", campaign.key().as_ref(), &nullifier],
+        bump
+    )]
+    pub nullifier_record: Account<'info, NullifierRecord>,
+
+    pub token_program: Program<'info, Token>,
+    pub associated_token_program: Program<'info, AssociatedToken>,
     pub system_program: Program<'info, System>,
 }
 

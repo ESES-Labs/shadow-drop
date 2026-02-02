@@ -34,7 +34,7 @@ pub struct ProofResponse {
     /// Merkle proof path (array of 32-byte hashes)
     pub merkle_path: Vec<String>,
     /// Claim amount in SOL
-    pub amount: f64,
+    pub amount: String,
     /// Secret for this claim (should be stored securely by user)
     pub secret: String,
 }
@@ -82,7 +82,7 @@ async fn generate_proof(
     let secret = generate_secret();
 
     // Build merkle tree with secrets
-    let recipients_with_secrets: Vec<(String, f64, [u8; 32])> = campaign
+    let recipients_with_secrets: Vec<(String, u64, [u8; 32])> = campaign
         .recipients
         .iter()
         .map(|r| {
@@ -98,7 +98,8 @@ async fn generate_proof(
                     recipient_secret[i % 32] ^= *b;
                 }
             }
-            (r.wallet.clone(), r.amount, recipient_secret)
+            let amount_u64 = r.amount.parse::<u64>().unwrap_or(0);
+            (r.wallet.clone(), amount_u64, recipient_secret)
         })
         .collect();
 
@@ -129,7 +130,7 @@ async fn generate_proof(
             nullifier_hash: nullifier_hex,
             leaf_index: proof.leaf_index,
             merkle_path,
-            amount: recipient.amount,
+            amount: recipient.amount.clone(),
             secret: secret_hex,
         })
         .with_message("Proof generated successfully"))

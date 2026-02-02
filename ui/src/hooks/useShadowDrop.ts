@@ -39,7 +39,8 @@ export function useShadowDrop() {
         connected: wallet.connected,
         publicKey: wallet.publicKey,
         connection,
-        network
+        network,
+        wallet
     };
 }
 

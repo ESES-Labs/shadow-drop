@@ -5,12 +5,14 @@ use crate::state::AppState;
 mod campaigns;
 mod proofs;
 mod zk_proofs;
+mod hash;
 
 pub fn app_routes(state: AppState) -> Router {
     let api_routes = Router::new()
         .nest("/campaigns", campaigns::campaign_routes())
         .nest("/proofs", proofs::proof_routes())
-        .nest("/zk-proofs", zk_proofs::zk_proof_routes());
+        .nest("/zk-proofs", zk_proofs::zk_proof_routes())
+        .nest("/hash", hash::hash_routes());
 
     Router::new()
         .nest("/api/v1", api_routes)
